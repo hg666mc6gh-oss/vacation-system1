@@ -8,7 +8,7 @@ import random
 FILE = "data.json"
 LIMIT = 28
 
-# ---------- DATA ----------
+# ---------------- DATA ----------------
 def load_data():
     try:
         with open(FILE, "r", encoding="utf-8") as f:
@@ -20,72 +20,69 @@ def save_data(data):
     with open(FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
-# ---------- SAFE PARSE ----------
-def parse(d):
-    if not d:
-        return None
-    try:
-        return datetime.strptime(d, "%d.%m.%Y")
-    except:
-        try:
-            return datetime.strptime(d, "%Y-%m-%d")
-        except:
-            return None
+# ---------------- THEME ----------------
+theme = {"dark": False}
 
-# ---------- COLORS ----------
+def set_theme():
+    if theme["dark"]:
+        style.configure("TLabel", background="#1e1e1e", foreground="white")
+        style.configure("TFrame", background="#1e1e1e")
+        style.configure("Treeview", background="#2b2b2b", fieldbackground="#2b2b2b", foreground="white")
+        root.configure(bg="#1e1e1e")
+    else:
+        style.configure("TLabel", background="#f4f4f4", foreground="black")
+        style.configure("TFrame", background="#f4f4f4")
+        style.configure("Treeview", background="white", fieldbackground="white", foreground="black")
+        root.configure(bg="#f4f4f4")
+
+# ---------------- COLOR ----------------
 def color(name):
     random.seed(name)
     return f"#{random.randint(90,210):02x}{random.randint(90,210):02x}{random.randint(90,210):02x}"
 
 RED = "#ff4d4d"
 
-# ---------- LOGIC ----------
-def overlap(data, name, s, e):
-    s1 = parse(s)
-    e1 = parse(e)
-    if not s1 or not e1:
-        return False
+# ---------------- DATE ----------------
+def parse(d):
+    return datetime.strptime(d, "%d.%m.%Y")
 
-    s1 = s1.date()
-    e1 = e1.date()
+# ---------------- LOGIC ----------------
+def overlap(data, name, s, e):
+    s1 = parse(s).date()
+    e1 = parse(e).date()
 
     for v in data["vacations"]:
         if v["name"] == name:
             s2 = parse(v["start"]).date()
             e2 = parse(v["end"]).date()
-
             if s1 <= e2 and e1 >= s2:
                 return True
     return False
 
-# ---------- EMP ----------
+# ---------------- EMP ----------------
 def add_emp():
     data = load_data()
     name = emp_entry.get().strip()
 
-    if not name:
-        return
-
-    if name in data["employees"]:
+    if not name or name in data["employees"]:
         return
 
     data["employees"].append(name)
     save_data(data)
-    refresh_employees()
+    refresh()
 
 def delete_emp():
     data = load_data()
 
-    for i in reversed(emp_listbox.curselection()):
-        name = data["employees"][i]
+    for item in emp_tree.selection():
+        name = emp_tree.item(item)["values"][0]
         data["employees"].remove(name)
         data["vacations"] = [v for v in data["vacations"] if v["name"] != name]
 
     save_data(data)
-    refresh_employees()
-    refresh_calendar()
+    refresh()
 
-# ---------- VAC ----------
+# ---------------- VAC ----------------
 def add_vac():
     data = load_data()
 
@@ -96,51 +93,42 @@ def add_vac():
     if name not in data["employees"]:
         return
 
-    ds = parse(s)
-    de = parse(e)
-
-    if not ds or not de:
-        return
-
-    if de < ds:
+    try:
+        ds = parse(s)
+        de = parse(e)
+    except:
         return
 
     if overlap(data, name, s, e):
         messagebox.showwarning("Конфликт", "Пересечение отпусков")
         return
 
-    days = (de - ds).days + 1
-
     data["vacations"].append({
         "name": name,
         "start": s,
         "end": e,
-        "days": days
+        "days": (de - ds).days + 1
     })
 
     save_data(data)
-    refresh_calendar()
+    draw_calendar()
 
-# ---------- CALENDAR (OPTIMIZED) ----------
-def refresh_calendar():
-    for w in cal_inner.winfo_children():
+# ---------------- CALENDAR ----------------
+def draw_calendar():
+    for w in cal_frame.winfo_children():
         w.destroy()
 
     data = load_data()
+    y = int(year.get())
 
-    try:
-        y = int(year.get())
-    except:
-        y = date.today().year
+    tk.Label(cal_frame, text=f"📅 {y}", font=("Arial", 16, "bold")).pack()
 
-    tk.Label(cal_inner, text=f"📅 {y}", font=("Segoe UI", 18, "bold")).pack()
-
-    grid = tk.Frame(cal_inner)
+    grid = tk.Frame(cal_frame)
     grid.pack()
 
     for m in range(1, 13):
         box = tk.LabelFrame(grid, text=calendar.month_name[m])
-        box.grid(row=(m-1)//4, column=(m-1)%4, padx=6, pady=6)
+        box.grid(row=(m-1)//4, column=(m-1)%4)
 
         cal = calendar.monthcalendar(y, m)
 
@@ -150,60 +138,60 @@ def refresh_calendar():
 
             for d in week:
                 if d == 0:
-                    tk.Label(row, text="   ").pack(side="left")
+                    tk.Label(row, text="  ").pack(side="left")
                     continue
 
                 cur = date(y, m, d)
-
                 names = []
 
                 for v in data["vacations"]:
-                    s = parse(v["start"])
-                    e = parse(v["end"])
-                    if not s or not e:
-                        continue
-
-                    s = s.date()
-                    e = e.date()
-
+                    s = parse(v["start"]).date()
+                    e = parse(v["end"]).date()
                     if s <= cur <= e:
                         names.append(v["name"])
 
-                if len(names) > 1:
-                    bg = RED
-                elif len(names) == 1:
-                    bg = color(names[0])
-                else:
-                    bg = "white"
+                bg = RED if len(names) > 1 else (color(names[0]) if names else "white")
 
                 tk.Label(row, text=str(d), width=3, bg=bg).pack(side="left")
 
-# ---------- EMP REFRESH ----------
-def refresh_employees():
+# ---------------- EMP UPDATE ----------------
+def refresh():
     data = load_data()
 
     combo["values"] = data["employees"]
 
-    emp_listbox.delete(0, tk.END)
+    emp_tree.delete(*emp_tree.get_children())
+
     for e in data["employees"]:
-        emp_listbox.insert(tk.END, e)
+        emp_tree.insert("", "end", values=(e,))
 
-    refresh_calendar()
+    draw_calendar()
 
-# ---------- UI ----------
+# ---------------- UI ----------------
 root = tk.Tk()
-root.title("HR ENTERPRISE OPTIMIZED")
+root.title("HR FINAL FIX")
 root.geometry("1200x850")
+
+style = ttk.Style()
+
+tk.Button(root, text="🌙 Тема", command=lambda: toggle()).pack()
+
+def toggle():
+    theme["dark"] = not theme["dark"]
+    set_theme()
+    draw_calendar()
 
 # EMP
 emp_entry = tk.Entry(root)
 emp_entry.pack()
 
 tk.Button(root, text="Добавить", command=add_emp).pack()
-tk.Button(root, text="Удалить", command=delete_emp).pack()
 
-emp_listbox = tk.Listbox(root, selectmode=tk.MULTIPLE)
-emp_listbox.pack()
+emp_tree = ttk.Treeview(root, columns=("name"), show="headings", height=5)
+emp_tree.heading("name", text="ФИО")
+emp_tree.pack()
+
+tk.Button(root, text="Удалить", command=delete_emp).pack()
 
 # VAC
 combo = ttk.Combobox(root)
@@ -217,15 +205,14 @@ end.pack()
 
 tk.Button(root, text="Добавить отпуск", command=add_vac).pack()
 
-# YEAR
 year = tk.StringVar(value=str(date.today().year))
 tk.Entry(root, textvariable=year).pack()
 
-tk.Button(root, text="Обновить", command=refresh_calendar).pack()
+tk.Button(root, text="Обновить", command=draw_calendar).pack()
 
-# CALENDAR
-cal_inner = tk.Frame(root)
-cal_inner.pack(fill="both", expand=True)
+cal_frame = tk.Frame(root)
+cal_frame.pack(fill="both", expand=True)
 
-refresh_employees()
+set_theme()
+refresh()
 root.mainloop()
