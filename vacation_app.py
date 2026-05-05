@@ -1,9 +1,10 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import json
 from datetime import datetime, date
 import calendar
 import random
+import pandas as pd
 
 FILE = "data.json"
 LIMIT = 28
@@ -12,7 +13,12 @@ LIMIT = 28
 def load_data():
     try:
         with open(FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+            if "employees" not in data:
+                data["employees"] = []
+            if "vacations" not in data:
+                data["vacations"] = []
+            return data
     except:
         return {"employees": [], "vacations": []}
 
@@ -21,97 +27,94 @@ def save_data(data):
         json.dump(data, f, indent=4, ensure_ascii=False)
 
 # ---------- COLORS ----------
-def get_color(name):
+def color(name):
     random.seed(name)
-    r = random.randint(80, 200)
-    g = random.randint(80, 200)
-    b = random.randint(80, 200)
-    return f"#{r:02x}{g:02x}{b:02x}"
+    return f"#{random.randint(80,200):02x}{random.randint(80,200):02x}{random.randint(80,200):02x}"
+
+RED = "#ff4d4d"
+
+# ---------- DATE ----------
+def parse(d):
+    return datetime.strptime(d, "%d.%m.%Y")
 
 # ---------- LOGIC ----------
-def days_between(s, e):
-    d1 = datetime.strptime(s, "%Y-%m-%d")
-    d2 = datetime.strptime(e, "%Y-%m-%d")
-    return (d2 - d1).days + 1
-
 def used_days(data, name):
     return sum(v["days"] for v in data["vacations"] if v["name"] == name)
 
 def overlap(data, name, s, e):
-    s1 = datetime.strptime(s, "%Y-%m-%d").date()
-    e1 = datetime.strptime(e, "%Y-%m-%d").date()
+    s1 = parse(s).date()
+    e1 = parse(e).date()
 
     for v in data["vacations"]:
         if v["name"] == name:
-            s2 = datetime.strptime(v["start"], "%Y-%m-%d").date()
-            e2 = datetime.strptime(v["end"], "%Y-%m-%d").date()
-
+            s2 = parse(v["start"]).date()
+            e2 = parse(v["end"]).date()
             if s1 <= e2 and e1 >= s2:
                 return True
     return False
 
-# ---------- EMPLOYEES ----------
-def add_employee():
+# ---------- EMP ----------
+def add_emp():
     data = load_data()
     name = emp_entry.get().strip()
 
     if not name:
-        messagebox.showerror("Ошибка", "Введите имя сотрудника")
         return
 
     if name in data["employees"]:
-        messagebox.showerror("Ошибка", "Сотрудник уже существует")
+        messagebox.showerror("Ошибка", "Уже есть")
         return
 
     data["employees"].append(name)
     save_data(data)
     refresh()
 
-def delete_employee():
+def delete_emp():
     data = load_data()
-    name = combo_emp.get()
 
-    if name in data["employees"]:
+    sel = emp_listbox.curselection()
+    if not sel:
+        return
+
+    for i in reversed(sel):
+        name = data["employees"][i]
         data["employees"].remove(name)
         data["vacations"] = [v for v in data["vacations"] if v["name"] != name]
-        save_data(data)
-        refresh()
 
-# ---------- VACATION ----------
-def add_vacation():
+    save_data(data)
+    refresh()
+
+# ---------- VAC ----------
+def add_vac():
     data = load_data()
 
-    name = combo_emp.get().strip()
-    s = start_entry.get().strip()
-    e = end_entry.get().strip()
+    name = combo.get()
+    s = start.get()
+    e = end.get()
 
     if name not in data["employees"]:
         messagebox.showerror("Ошибка", "Выбери сотрудника")
         return
 
-    if not name or not s or not e:
-        messagebox.showerror("Ошибка", "Заполни все поля")
-        return
-
     try:
-        ds = datetime.strptime(s, "%Y-%m-%d")
-        de = datetime.strptime(e, "%Y-%m-%d")
+        ds = parse(s)
+        de = parse(e)
     except:
-        messagebox.showerror("Ошибка", "Формат даты: YYYY-MM-DD")
+        messagebox.showerror("Ошибка", "DD.MM.YYYY")
         return
 
     if de < ds:
-        messagebox.showerror("Ошибка", "Дата окончания раньше начала")
+        messagebox.showerror("Ошибка", "Дата ошибки")
         return
 
     if overlap(data, name, s, e):
-        messagebox.showerror("Ошибка", "Пересечение отпусков")
+        messagebox.showerror("Ошибка", "Пересечение")
         return
 
-    days = days_between(s, e)
+    days = (de - ds).days + 1
 
     if used_days(data, name) + days > LIMIT:
-        messagebox.showerror("Ошибка", "Превышен лимит 28 дней")
+        messagebox.showerror("Ошибка", "Лимит 28")
         return
 
     data["vacations"].append({
@@ -124,132 +127,133 @@ def add_vacation():
     save_data(data)
     refresh()
 
-# ---------- TABLE ----------
-def refresh_table():
+# ---------- EXCEL ----------
+def export_excel():
     data = load_data()
-    tree.delete(*tree.get_children())
 
-    for i, v in enumerate(data["vacations"]):
-        tree.insert("", "end", iid=i, values=(
-            v["name"], v["start"], v["end"], v["days"]
-        ))
+    if not data["vacations"]:
+        messagebox.showinfo("Info", "Нет данных")
+        return
 
-# ---------- EMP ----------
-def refresh_emp():
+    df = pd.DataFrame(data["vacations"])
+
+    path = filedialog.asksaveasfilename(defaultextension=".xlsx")
+    if path:
+        df.to_excel(path, index=False)
+        messagebox.showinfo("OK", "Готово")
+
+# ---------- EMP FILTER ----------
+def get_selected_employees():
+    sel = emp_listbox.curselection()
     data = load_data()
-    combo_emp["values"] = data["employees"]
 
-    if data["employees"]:
-        combo_emp.set(data["employees"][0])
+    if not sel:
+        return data["employees"]
+
+    return [data["employees"][i] for i in sel]
 
 # ---------- CALENDAR ----------
-def draw_calendar():
+def draw():
     for w in cal_frame.winfo_children():
         w.destroy()
 
-    if not month_var.get().isdigit() or not year_var.get().isdigit():
-        messagebox.showerror("Ошибка", "Некорректный месяц или год")
-        return
-
     data = load_data()
 
-    y = int(year_var.get())
-    m = int(month_var.get())
+    try:
+        y = int(year.get())
+    except:
+        y = date.today().year
 
-    cal = calendar.monthcalendar(y, m)
+    selected = get_selected_employees()
 
-    tk.Label(
-        cal_frame,
-        text=f"{calendar.month_name[m]} {y}",
-        font=("Arial", 16, "bold")
-    ).pack()
+    tk.Label(cal_frame, text=f"{y} ENTERPRISE FIXED", font=("Arial", 18, "bold")).pack()
 
     grid = tk.Frame(cal_frame)
     grid.pack()
 
-    days = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+    for m in range(1, 13):
+        mf = tk.Frame(grid, bd=1, relief="solid")
+        mf.grid(row=(m-1)//4, column=(m-1)%4, padx=3, pady=3)
 
-    for i, d in enumerate(days):
-        tk.Label(grid, text=d, width=14, bg="#ddd").grid(row=0, column=i)
+        tk.Label(mf, text=calendar.month_name[m]).pack()
 
-    for r, week in enumerate(cal):
-        for c, day in enumerate(week):
-            if day == 0:
-                continue
+        cal = calendar.monthcalendar(y, m)
 
-            current = date(y, m, day)
+        for week in cal:
+            row = tk.Frame(mf)
+            row.pack()
 
-            text = str(day)
-            bg = "white"
+            for d in week:
+                if d == 0:
+                    tk.Label(row, text=" ", width=3).pack(side="left")
+                    continue
 
-            for v in data["vacations"]:
-                s = datetime.strptime(v["start"], "%Y-%m-%d").date()
-                e = datetime.strptime(v["end"], "%Y-%m-%d").date()
+                cur = date(y, m, d)
 
-                if s <= current <= e:
-                    text += f"\n{v['name']}"
-                    bg = get_color(v["name"])
+                names = []
 
-            tk.Label(
-                grid,
-                text=text,
-                width=14,
-                height=3,
-                relief="solid",
-                bg=bg
-            ).grid(row=r+1, column=c)
+                for v in data["vacations"]:
+                    if v["name"] not in selected:
+                        continue
+
+                    s = parse(v["start"]).date()
+                    e = parse(v["end"]).date()
+
+                    if s <= cur <= e:
+                        names.append(v["name"])
+
+                if len(names) > 1:
+                    bg = RED
+                elif len(names) == 1:
+                    bg = color(names[0])
+                else:
+                    bg = "white"
+
+                tk.Label(row, text=str(d), width=3, bg=bg, relief="ridge").pack(side="left")
 
 # ---------- REFRESH ----------
 def refresh():
-    refresh_emp()
-    refresh_table()
-    draw_calendar()
+    data = load_data()
+
+    combo["values"] = data["employees"]
+
+    emp_listbox.delete(0, tk.END)
+    for e in data["employees"]:
+        emp_listbox.insert(tk.END, e)
+
+    draw()
 
 # ---------- UI ----------
 root = tk.Tk()
-root.title("HR Vacation PRO MAX FIXED")
-root.geometry("1100x700")
+root.title("HR ENTERPRISE FIXED ULTIMATE")
+root.geometry("1200x850")
 
-top = tk.Frame(root)
-top.pack()
+emp_entry = tk.Entry(root)
+emp_entry.pack()
 
-# employees
-emp_entry = tk.Entry(top)
-emp_entry.grid(row=0, column=0)
+tk.Button(root, text="Добавить", command=add_emp).pack()
+tk.Button(root, text="Удалить", command=delete_emp).pack()
 
-tk.Button(top, text="Добавить сотрудника", command=add_employee).grid(row=0, column=1)
-tk.Button(top, text="Удалить сотрудника", command=delete_employee).grid(row=0, column=2)
+emp_listbox = tk.Listbox(root, selectmode=tk.MULTIPLE, height=6)
+emp_listbox.pack()
 
-combo_emp = ttk.Combobox(top)
-combo_emp.grid(row=1, column=0)
+combo = ttk.Combobox(root)
+combo.pack()
 
-# vacation
-start_entry = tk.Entry(top)
-end_entry = tk.Entry(top)
+start = tk.Entry(root)
+end = tk.Entry(root)
 
-start_entry.grid(row=1, column=1)
-end_entry.grid(row=1, column=2)
+start.pack()
+end.pack()
 
-tk.Button(top, text="Добавить отпуск", command=add_vacation).grid(row=1, column=3)
+tk.Button(root, text="Добавить отпуск", command=add_vac).pack()
 
-# calendar controls
-month_var = tk.StringVar(value=str(date.today().month))
-year_var = tk.StringVar(value=str(date.today().year))
+year = tk.StringVar(value=str(date.today().year))
+tk.Entry(root, textvariable=year).pack()
 
-tk.Entry(top, textvariable=month_var, width=5).grid(row=2, column=0)
-tk.Entry(top, textvariable=year_var, width=5).grid(row=2, column=1)
+tk.Button(root, text="Обновить", command=draw).pack()
+tk.Button(root, text="Excel", command=export_excel).pack()
 
-tk.Button(top, text="Обновить календарь", command=draw_calendar).grid(row=2, column=2)
-
-# table
-tree = ttk.Treeview(root, columns=("n","s","e","d"), show="headings")
-tree.heading("n", text="Сотрудник")
-tree.heading("s", text="Начало")
-tree.heading("e", text="Конец")
-tree.heading("d", text="Дней")
-tree.pack(fill="x")
-
-# calendar
 cal_frame = tk.Frame(root)
 cal_frame.pack(fill="both", expand=True)
 
